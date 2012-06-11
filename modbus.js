@@ -6,3 +6,8 @@ connection.on('connect', function() {
 	console.log('connected');
 	connection.write('Hello');
 });
+
+connection.on('close', function() {
+	console.log('closed');
+	connection.end();
+});
