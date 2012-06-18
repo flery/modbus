@@ -1,54 +1,80 @@
 var net = require('net');
 
-var Request = {};
-var Response = {};
+function ModbusHeader() {
+  if (!(this instanceof ModbusHeader)) {
+    return new ModbusHeader();
+  }
+}
 
-var ReadMultipleRegisters = {};
-ReadMultipleRegisters.parse = function(buffer) {
+ModbusHeader.prototype.parse = function parse(data) {
+	
+	this.transactionIdentifier = data.readInt16BE(0);
+	this.protocolIdentifier =  data.readInt16BE(2);
+	this.length =  data.readInt16BE(4);
+	this.unitIdentifier = data.readInt8(6);
+	this.functionCode = data.readInt8(7);
+	
 };
 
+ModbusHeader.prototype.setSize = function setSize(size) {
+		
+	this.size = size;
+};
+
+ModbusHeader.prototype.toBuffer = function toBuffer() {
+		
+	var rsp = new Buffer(8);
+	
+	rsp.writeInt16BE(this.transactionIdentifier,0);
+	rsp.writeInt16BE(this.protocolIdentifier,2);
+	rsp.writeInt16BE(2 + this.size,4);
+	
+	rsp.writeInt8(this.unitIdentifier,6);
+	rsp.writeInt8(this.functionCode,7);
+	
+	return rsp;
+};
+
+
 var server = net.createServer(function(socket) { //'connection' listener
-  console.log('server connected');
-  socket.on('end', function() {
-    console.log('server disconnected');
-  });
-  
+	
+	console.log('server connected');
+	
+	socket.on('end', function() {
+		console.log('server disconnected');
+	});
+	
     socket.on('data', function(data) {
-		console.log(data);
+		console.log(data);	
+		var header = new ModbusHeader();
+		header.parse(data);
 		
-		console.log(data.length);
-		var telegram = {};
-		telegram.transactionIdentifier = data.readInt16BE(0);
-		telegram.protocolIdentifier =  data.readInt16BE(2);
-		telegram.length =  data.readInt16BE(4);
-		telegram.unitIdentifier = data.readInt8(6);
-		telegram.functionCode = data.readInt8(7);
-		
-		switch(telegram.functionCode)
+		switch(header.functionCode)
 		{
 
 		case 3:
+		
 			console.log("recieved FC3");
-			telegram.offset = data.readInt16BE(8);
-			telegram.size = data.readInt16BE(10);
+			var readOffset = data.readInt16BE(8);
+			var readCount = data.readInt16BE(10);
 			
-			var rsp = new Buffer(telegram.size*2+9); // payload + header
 			
-			// mbtcp header
-			rsp.writeInt16BE(telegram.transactionIdentifier,0);
-			rsp.writeInt16BE(telegram.protocolIdentifier,2);
-			rsp.writeInt16BE(telegram.size*2+3,4);
+			// construct response payload
+			var rsp = new Buffer(readCount*2+1);
+			rsp.writeInt8(readCount*2,0); // 2*wordcount as data payload size
 			
-			rsp.writeInt8(telegram.unitIdentifier,6);
-			rsp.writeInt8(telegram.functionCode,7);	
-			rsp.writeInt8(telegram.size*2,8); // 2*wordcount as data payload size
-			
-			for (var i = 0; i < telegram.size; i++)
+			for (var i = 0; i < readCount; i++)
 			{
-				rsp.writeInt16BE(i,9+(i*2));
+				rsp.writeInt16BE(header.transactionIdentifier+i,1+(i*2));
 			}
-			console.log(rsp);
+			
+			// send response
+			header.setSize(rsp.length);	
+			socket.write(header.toBuffer());
 			socket.write(rsp);
+			
+			console.log(header);
+			console.log(rsp);
 			break;
 		
 		// raise illegal function exception
@@ -57,19 +83,19 @@ var server = net.createServer(function(socket) { //'connection' listener
 			var rsp = new Buffer(9);
 			
 			// mbtcp header
-			rsp.writeInt16BE(telegram.transactionIdentifier,0);
-			rsp.writeInt16BE(telegram.protocolIdentifier,2);
+			rsp.writeInt16BE(header.transactionIdentifier,0);
+			rsp.writeInt16BE(header.protocolIdentifier,2);
 			rsp.writeInt16BE(3,4); // 3 bytes payload
 			
-			rsp.writeInt8(telegram.unitIdentifier,6);
-			rsp[7] = 0x80 | telegram.functionCode; // exception rsp function code
+			rsp.writeInt8(header.unitIdentifier,6);
+			rsp[7] = 0x80 | header.functionCode; // exception rsp function code
 			rsp[8] = 0x01; // exception code
 			
 			console.log(rsp);
 			socket.write(rsp);
 			
 		}
-		console.log(telegram);
+		console.log(header);
 		
     });
 });
